@@ -1,0 +1,19 @@
+ plugins {
+     id "java"
+}
+
+defaultTasks 'teal'
+
+task teal {
+    dependsOn ':compiler:jar'
+    doLast {
+        copy {
+            from project(':compiler').jar.outputs.files
+            into projectDir
+        }
+    }
+}
+
+test {
+    dependsOn ':compiler:test'
+}

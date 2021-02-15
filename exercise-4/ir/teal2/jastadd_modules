@@ -1,0 +1,12 @@
+// Teal intermediate representation
+module("teal-2-ir") {
+    moduleName "teal-2-ir"
+
+    imports "teal-0-ir"
+
+    jastadd {
+	    include "ast/object.ast"
+	    include "ast/IRPrint.jrag"
+	    include "ast/IRInterpreter.jrag"
+    }
+}
