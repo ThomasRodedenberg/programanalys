@@ -1,0 +1,83 @@
+aspect IRGenType {
+	syn IRTypeFormal TypeVarDecl.genIR() {
+		return new IRTypeFormal(new IRName(name()));
+	}
+
+	syn IRTypeCon TypeDecl.genIR() {
+		return this.genIRStruct();
+	}
+
+	syn IRClass TypeDecl.genIRStruct() {
+		// FIXME: easier get-name for everything
+		// class with a name
+		IRClass klass = new IRClass().setIRName(new IRName(name()));
+		klass.setSourceLocation(this.sourceLocation());
+		// set formal type parameters
+		for (TypeVarDecl d : getTypeFormals()) {
+			IRTypeFormal formal = d.genIR();
+			formal.setSourceLocation(d.sourceLocation());
+			klass.addIRTypeFormal(formal);
+		}
+
+		return klass;
+	}
+
+	@Override
+	public void TypeDecl.postprocessIR() {
+		IRClass klass = this.genIRStruct();
+		// set fields
+		for (VarDecl d : getFunFormals()) {
+			IRVar field = d.genIR();
+			field.setSourceLocation(d.sourceLocation());
+			klass.addIRVar(field);
+		}
+	}
+
+	public void TypeDecl.genCode(IRClass klass) {
+		// add the class argument parameters as fields
+		for (VarDecl d : getFunFormals()) {
+			klass.addIRVar(d.genIR());
+		}
+	}
+
+	public IRTypeRef Decl.genIRTypeRef() {
+		return null;
+	}
+
+	@Override public IRTypeRef TypeDecl.genIRTypeRef() {
+		IRTypeRef retval = new IRType().setIRTypeCon(genIR());
+		return retval;
+	}
+
+	public IRTypeRef Type.genIR() {
+		Decl d = getIdUse().lookup().getDecl();
+		if (d instanceof TypeVarDecl) {
+			return d.genIRTypeRef();
+		} else if (d instanceof TypeDecl) {
+			IRType t = (IRType) ((TypeDecl) d).genIRTypeRef();
+			for (Type actual : getActuals()) {
+				t.addTypeActual(actual.genIR());
+			}
+
+			for (TypeQualifier q : getTypeQualifiers()) {
+				t.addIRQualifier(q.genIR());
+			}
+			return t;
+			// TODO: add qualifiers here
+		} else {
+			throw new RuntimeException("Can't generate a type reference to something that is not a type, " + d + ".");
+		}
+	}
+
+
+	inh Type TypeQualifier.getQualifiedType();
+	eq Type.getTypeQualifier().getQualifiedType() = this;
+
+	public IRQualifier TypeQualifier.genIR() {
+		return null;
+	}
+
+	@Override public IRQualifier NonNullQualifier.genIR() {
+		return new IRNonNull();
+	}
+}

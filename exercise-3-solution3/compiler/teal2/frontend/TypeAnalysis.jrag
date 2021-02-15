@@ -1,0 +1,94 @@
+aspect TypeAnalysis {
+	public interface TypeDefinition {
+		lang.ir.IRTypeRef genIRTypeRef(); // code generation only
+		IdDecl memberLookup(String name);
+	}
+
+	public class QualifiedTypeDefinition implements TypeDefinition {
+		private TypeDefinition d;
+		private Iterable<TypeQualifier> quals;
+
+		public QualifiedTypeDefinition(TypeDefinition d, Iterable<TypeQualifier> quals) {
+			this.d = d;
+			this.quals = quals;
+		}
+
+		public lang.ir.IRTypeRef genIRTypeRef() {
+			IRTypeRef irType = d.genIRTypeRef();
+			for (TypeQualifier q : quals) {
+				((IRType) irType).addIRQualifier(q.genIR());
+			}
+			return irType;
+		}
+
+		public IdDecl memberLookup(String name) {
+			return d.memberLookup(name);
+		}
+	}
+
+	eq TypeDecl.typeDefinition() = this;
+
+	TypeDecl implements TypeDefinition;
+	TypeVarDecl implements TypeDefinition;
+	Type implements TypeDefinition;
+
+	syn IdDecl Type.memberLookup(String s) {
+		TypeDefinition td = (TypeDefinition) getIdUse().lookup().getDecl();
+		return td.memberLookup(s);
+	}
+
+	syn TypeDefinition Type.qualifiedTypeDefinition() {
+		return this;
+	}
+
+	// The following gives us the type of the expression if and only if we know the type precisely
+	syn TypeDefinition Expr.implicitType() = null;
+	eq IntConstant.implicitType() = program().INT();
+	eq StringConstant.implicitType() = program().STRING();
+	eq TypedExpr.implicitType() {
+		return getDeclaredType().qualifiedTypeDefinition();
+	}
+
+	// The inferred type of the expression:
+	syn TypeDefinition Expr.type() {
+		TypeDefinition ty = this.implicitType();
+		if (ty != null)
+			return ty;
+		return program().ANY();
+	}
+
+	syn TypeDefinition VarDecl.variableType() {
+		if (hasDeclaredType()) {
+			return (TypeDefinition) getDeclaredType().qualifiedTypeDefinition();
+		}
+		if (hasInitializer()) {
+			return getInitializer().type();
+		}
+		return program().ANY();
+	}
+
+	syn TypeDefinition FunDecl.returnType() {
+		if (hasDeclaredReturnType()) {
+			return (TypeDefinition) getDeclaredReturnType().qualifiedTypeDefinition();
+		}
+		return program().ANY();
+	}
+
+	eq Access.type() {
+		VarDecl d = (VarDecl) getIdUse().lookup().getDecl();
+		if (d.hasDeclaredType())
+			return (TypeDefinition) d.getDeclaredType().qualifiedTypeDefinition();
+		return program().ANY();
+	}
+
+	eq MemberAccess.type() {
+		Expr base = getExpr();
+		IdDecl varId = base.type().memberLookup(getIdentifier());
+		if (varId.isUnknown())
+			return program().ANY();
+		Decl d = varId.getDecl();
+		if (d.isVarDecl())
+			return d.asVarDecl().variableType();
+		return program().ANY();
+	}
+}
