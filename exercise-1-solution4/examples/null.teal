@@ -1,0 +1,5 @@
+fun main() = {
+    var x : int := null;
+    var y : string := null;
+    var z : array[int] := null;
+}

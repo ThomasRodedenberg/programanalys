@@ -1,0 +1,7 @@
+fun main() = {
+    if (read() == "LOL") {
+       return 0;
+    } else {
+       return "Hehe"; 
+    }
+}

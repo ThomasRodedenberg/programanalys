@@ -1,0 +1,8 @@
+fun f() = {
+    return 0;
+}
+
+fun main() = {
+    var x : string;
+    x := f();
+}

@@ -1,0 +1,18 @@
+fun f(x) = {
+    return x;
+}
+
+fun e(x : any) = {
+    return x;
+}
+
+fun main() = {
+    var x := f(5); 
+
+    var y := e(5);
+
+    // Binary operators
+    var z := 5 + 5; 
+
+    var w := "hello" + "world"; 
+}

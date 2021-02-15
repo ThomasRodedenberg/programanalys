@@ -1,0 +1,13 @@
+fun id(x) = {
+    return x;
+}
+
+fun main() = {
+    var x := id(4);
+
+    var y := id("hello");
+
+    print(x);
+
+    print(y);
+}

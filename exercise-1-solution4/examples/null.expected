@@ -1,0 +1,4 @@
+A 1 main () -> _3
+A 2 x int
+A 3 y string
+A 4 z array[int]

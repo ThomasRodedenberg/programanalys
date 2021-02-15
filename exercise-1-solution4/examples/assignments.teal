@@ -1,0 +1,9 @@
+fun main() = {
+
+    var x := 0;
+    x := 5;
+
+
+    var y : any;
+    y := 5;
+}

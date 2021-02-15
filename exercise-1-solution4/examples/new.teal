@@ -1,0 +1,5 @@
+fun main() = {
+    var a := new array[int](14);
+
+    var e := new array[string](14);
+}
