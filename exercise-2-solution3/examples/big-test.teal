@@ -1,0 +1,17 @@
+fun main() = {
+    var x := null;
+    var y: nonnull int := 2;
+    var z: nonnull int := 3;
+    var a := null;
+    if (z > 1) {
+        y := null;
+    }
+    a := x;
+    a := y;
+    a := z;
+    var b := a;
+    if (z > 1) {
+      a := y;
+    }
+    return 0;
+}

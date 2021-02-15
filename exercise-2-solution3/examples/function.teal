@@ -1,0 +1,8 @@
+fun f() : nonnull int = { return 0; }
+
+fun g() = { return null; }
+
+fun main() = {
+    var x : nonnull int := f(); // NC 6 27, N 6 4 +
+    var y : nonnull int := g(); // NC 7 27, N 7 4 ?
+}

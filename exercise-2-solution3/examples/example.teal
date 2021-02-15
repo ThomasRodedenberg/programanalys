@@ -1,0 +1,7 @@
+fun main() = {
+    var x := new array[int](10);
+    var y: nonnull int := 1;
+    x[0] := null;
+    y := x[0];
+    return 0;
+}

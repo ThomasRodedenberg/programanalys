@@ -1,0 +1,9 @@
+fun main () = {
+    var x := 0;
+
+    var y : nonnull int := null; // N 4 4 0 
+    while (x < 10) { // NC 5 10 ++
+          y := x; // N 6 10 +
+    }
+    var z : nonnull int := y; // N 8 4 +
+}

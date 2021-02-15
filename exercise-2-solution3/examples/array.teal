@@ -1,0 +1,6 @@
+fun main() = {
+    var a : nonnull array[nonnull int] := [1, 2, 3, 4]; // some stuff,  N 2 4 +
+
+    var x := a[1]; // NI 4 13 +, N 4 4 = 
+    var y := a[null]; // NI 5 13 0, N 5 5 =
+}

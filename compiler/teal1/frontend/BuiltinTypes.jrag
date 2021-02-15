@@ -1,0 +1,20 @@
+aspect BuiltinTypes {
+	// Add nonnull annotations to builtins
+	refine BuiltinTypes eq Program.simpleTypeFromName(String typename) {
+		switch (typename) {
+		case BuiltinNames.INT:
+			return new NonNullType(new IntType());
+		case "string":
+			return new NonNullType(new StringType());
+		case "array":
+		    // FIXME: we don't have parametric types here, so we must change the types of
+		    // functions that operate over arrays to use "any".
+		    // This is fine, as long as we don't do any type checking or inference...
+		    return new AnyType();
+		case "any":
+			return new NonNullType(new AnyType());
+		default:
+			throw new RuntimeException("Can't build type from name " + typename);
+		}
+	}
+}

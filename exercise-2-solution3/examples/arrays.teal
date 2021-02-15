@@ -1,0 +1,9 @@
+fun main() = {
+  var x: nonnull int := 1;
+  var y: nonnull int := 1;
+  var v := new array[nonnull int](10);
+  var z := new array[int](10);
+  x := v[0];
+  y := z[0];
+}
+

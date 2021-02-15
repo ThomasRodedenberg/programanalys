@@ -1,0 +1,52 @@
+fun quicksort(Ain : array[int]) = {
+    var A := new array[nonnull int](array_length(Ain));
+    var i := 0;
+    while i < array_length(Ain) {
+	A[i] := Ain[i];
+        i := i + 1;
+    }
+    quicksort_range(A, 0, array_length(A) - 1);
+    return A;
+}
+
+  fun quicksort_range(A, lo : nonnull int, hi : nonnull int) = {
+    if lo < hi {
+        var p := partition(A, lo, hi);
+        quicksort_range(A, lo, p);
+        quicksort_range(A, p + 1, hi);
+    }
+}
+
+fun partition(A : array[nonnull int], lo : nonnull int, hi : nonnull int) : nonnull int = {
+    var pivot := A[(hi + lo) / 2];
+    var i := lo - 1;
+    var j := hi + 1;
+    while 1 {
+	i := i + 1;
+        while A[i] < pivot {
+	    i := i + 1;
+	}
+
+        j := j - 1;
+	while A[j] > pivot {
+	    j := j - 1;
+	}
+
+        if i >= j {
+            return j;
+	}
+	var v := A[i];
+	A[i] := A[j];
+	A[j] := v;
+    }
+}
+
+fun main() = {
+    print(quicksort([]));
+    print(quicksort([1]));
+    print(quicksort([2, 1]));
+    print(quicksort([3, 1, 2]));
+    print(quicksort([1, 2, 3, 4]));
+    print(quicksort([5, 2, 3, 1, 4]));
+    print(quicksort([6, 5, 4, 3, 2, 1]));
+}

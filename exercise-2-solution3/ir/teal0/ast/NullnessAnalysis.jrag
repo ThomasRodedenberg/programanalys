@@ -1,0 +1,500 @@
+// Nullness Analysis
+
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.lang.StringBuilder;
+
+
+
+
+// Monotone Framework description
+// ------------------------------
+// Lattice Values: 
+// Top:            
+// Bottom:         
+// Join Function:
+//
+// Direction:     
+
+aspect NullnessAnalysis {
+    // We represent the IR as a JastAdd AST, so it can contain attribute computations etc.
+
+    // Check:
+    // - ir.ast   for a description of the intermediate representation
+    // - IR.jrag  for some useful helper operations
+
+    // TODO: implement lattice in Java, test!
+    // TODO: implement transfer functions, test!
+    // TODO: implement MFP algorithm, test!
+    // TODO: check IRInsns for assignments to nunnull, test!
+    //       (CFG consists of basic blocks, but these checks must be done at
+    //        IRInsn level.)
+    // TODO: generate output, test!
+
+    class Edge {
+        private IRCodeBB tail;
+        private IRCodeBB head;
+
+        public Edge(IRCodeBB tail, IRCodeBB head) {
+            this.tail = tail;
+            this.head = head;
+        }
+
+        public IRCodeBB getTail() {
+            return tail;
+        }
+
+        public IRCodeBB getHead() {
+            return head;
+        }
+    }
+
+    syn String IRInsn.showVars(AbstractState s);
+
+    eq IRInsn.showVars(AbstractState s) {
+        return "";
+    }
+
+    eq IRCopyInsn.showVars(AbstractState s) {
+        IRVar dst = getDst().getIRVar();
+        IRVar src = getSrc().getIRVar();
+        SourceLocation loc = getSourceLocation();
+        IRType dstType = (IRType) dst.getIRTypeRef();
+        if (!dst.getIRName().toString().contains("tmp") && dstType.isNonNull()) {
+            String latticeString = s.getLattice(src).toString();
+            return "N " + loc.getStartLine()
+                + " " + loc.getStartColumn() + " " + latticeString + "\n";
+        }
+        return "";
+    }
+
+    eq IRCallInsn.showVars(AbstractState s) {
+        IRVarRef dst = getDst();
+        IRFunRef ref = getIRFunRef();
+        IRFunction fun = ref.getIRFunction();
+        SourceLocation loc = getSourceLocation();
+        StringBuilder sb = new StringBuilder();
+
+        int i = 0;
+        StringBuilder lattices = new StringBuilder();
+        for (IRTypeRef paramRef : fun.getParamTypes()) {
+            IRType t = (IRType) paramRef;
+            IRVar arg = getArg(i).getIRVar();
+            if (t.isNonNull()) {
+                lattices.append(s.getLattice(arg).toString());
+            }
+            i++;
+        }
+
+        sb.append("NC " + loc.getStartLine()
+            + " " + loc.getStartColumn() + " " + lattices.toString() + "\n"); 
+
+        return sb.toString();
+    }
+
+    eq IRStoreArrayInsn.showVars(AbstractState s) {
+        IRVarRef src = getSrc();
+        IRVarRef base = getBase();
+        IRVarRef index = getIndex();
+        SourceLocation loc = getSourceLocation();
+        IRType baseType = (IRType) base.getIRVar().getIRTypeRef();
+
+        boolean isNonNull = false;
+        for (IRTypeRef ref : baseType.getTypeActuals()) {
+            IRType t = (IRType) ref;
+            if (t.isNonNull()) {
+                isNonNull = true;
+            }
+        }
+
+        StringBuilder sb = new StringBuilder();
+        if (isNonNull) {
+            String latticeString = s.getLattice(index.getIRVar()).toString();
+            sb.append("NI " + loc.getStartLine()
+                + " " + loc.getStartColumn() + " " + latticeString + "\n");
+            latticeString = s.getLattice(src.getIRVar()).toString();
+            sb.append("N " + loc.getStartLine()
+                + " " + loc.getStartColumn() + " " + latticeString + "\n");
+        }
+        return sb.toString();
+    }
+
+    eq IRLoadArrayInsn.showVars(AbstractState s) {
+        IRVarRef dst = getDst();
+        IRVarRef base = getBase();
+        IRVarRef index = getIndex();
+        SourceLocation loc = getSourceLocation();
+        IRType baseType = (IRType) base.getIRVar().getIRTypeRef();
+        boolean isNonNull = false;
+        for (IRTypeRef ref : baseType.getTypeActuals()) {
+            IRType t = (IRType) ref;
+            if (t.isNonNull()) {
+                isNonNull = true;
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        if (isNonNull) {
+            String latticeString = s.getLattice(index.getIRVar()).toString();
+            sb.append("NI " + loc.getStartLine()
+                + " " + loc.getStartColumn() + " " + latticeString + "\n");
+        }
+        IRType dstType = (IRType) dst.getIRVar().getIRTypeRef();
+        if (dstType.isNonNull()) {
+            String latticeString = s.getLattice(base.getIRVar()).toString();
+            sb.append("N " + loc.getStartLine()
+                + " " + loc.getStartColumn() + " " + latticeString + "\n");
+        }
+        return sb.toString();
+    }
+
+    public class MFP {
+
+        /*
+
+        use typeactuals for arrays,
+        write transfer for storearray.
+        */
+
+        static public void print(Map<IRCodeBB, AbstractState> state) {
+            for (IRCodeBB bb : state.keySet()) {
+			    AbstractState s = state.get(bb);
+                for (IRInsn inst : bb.getIRInsns()) {
+                    String output = inst.showVars(s);
+                    if (!s.equals("")) {
+                        System.out.print(output);
+                    }
+                }
+	        }
+        }
+
+        static public Map<IRCodeBB, AbstractState> run(IRProgram ir) {
+            LinkedList<Edge> worklist = new LinkedList<>();
+            for (IRModule m : ir.getIRModules()) {
+                for (IRFunction f : m.getIRFunctions()) {
+                    for (IRCodeBB bb : f.getIRCodeBBs()) {
+                        for (IRCodeBB bbSucc : bb.succ()) {
+                            Edge edge = new Edge(bb, bbSucc);
+                            worklist.add(edge);
+                        }
+                    }
+                }
+		    }
+
+            Set<IRVar> vars = new HashSet<>();
+            IRVar yVar = null;
+            for (IRModule m : ir.getIRModules()) {
+                for (IRFunction f : m.getIRFunctions()) {
+                    for (IRVar var : f.getLocals()) {
+                        if (var.getIRName().toString().contains("y")) {
+                            yVar = var;
+                        }
+                        vars.add(var);
+                    }
+                }
+            }
+            
+            Map<IRCodeBB, AbstractState> in = new HashMap<>();
+            for (IRModule m : ir.getIRModules()) {
+                for (IRFunction f : m.getIRFunctions()) {
+                    for (IRCodeBB bb : f.getIRCodeBBs()) {
+                        in.put(bb, new AbstractState(vars));
+                    }
+                }
+		    }
+
+            while (!worklist.isEmpty()) {
+                Edge edge = worklist.remove(0);
+                IRCodeBB tail = edge.getTail();
+                IRCodeBB head = edge.getHead();
+                AbstractState s1 = tail.trans(in.get(tail));
+                AbstractState s2 = in.get(head);
+                if  (!s1.compareTo(s2)) {
+                    AbstractState s3 = s2.join(s1);
+                    in.put(head, s3);
+                    for (IRCodeBB headSucc : head.succ()) {
+                        worklist.add(new Edge(head, headSucc));
+                    }
+                }
+            }
+
+
+            for (IRModule m : ir.getIRModules()) {
+                for (IRFunction f : m.getIRFunctions()) {
+                    for (IRCodeBB bb : f.getIRCodeBBs()) {
+                        AbstractState s = in.get(bb);
+                        in.put(bb, bb.trans(s));
+                    }
+                }
+		    }
+
+            return in;
+        }
+    }
+
+    syn Set<IRCodeBB> IRCodeBB.succ() {
+        IRCodeExit exit = getIRCodeExit();
+        Set<IRCodeBB> succ = new HashSet<>();
+        if (exit instanceof IRJump) {
+            IRJump jmp = (IRJump) exit;
+            succ.add(jmp.getIRCodeBBRef().getIRCodeBB());
+        } else if (exit instanceof IRBranch) {
+            IRBranch branch = (IRBranch) exit;
+            succ.add(branch.getTrueTarget().getIRCodeBB());
+            succ.add(branch.getFalseTarget().getIRCodeBB());
+        }
+        return succ;
+    }
+
+    public class AbstractState {
+        private Map<IRVar, Lattice> state;
+
+        public AbstractState(Set<IRVar> vars) {
+            state = new HashMap<>();
+            for (IRVar var : vars) {
+                state.put(var, new Bottom());
+            }
+        }
+
+        private AbstractState(Map<IRVar, Lattice> state) {
+            this.state = new HashMap<>();
+            for (IRVar var : state.keySet()) {
+                this.state.put(var, state.get(var));
+            }
+        }
+
+        public Lattice getLattice(IRVar var) {
+            return state.get(var);
+        }
+
+        public void setLattice(IRVar var, Lattice l) {
+            state.put(var, l);
+        }
+
+        public AbstractState newState() {
+            return new AbstractState(state);
+        }
+
+        // this <= other
+        public boolean compareTo(AbstractState other) {
+            for (IRVar var : state.keySet()) {
+                Lattice l1 = getLattice(var);
+                Lattice l2 = other.getLattice(var);
+                boolean result = l1.compareTo(l2);
+                if (!result) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        public AbstractState join(AbstractState other) {
+            AbstractState newState = newState();
+            for (IRVar var : state.keySet()) {
+                Lattice l1 = getLattice(var);
+                Lattice l2 = other.getLattice(var);
+                Lattice l3 = l1.join(l2);
+                newState.setLattice(var, l3);
+            }
+            return newState;
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            for (IRVar key : state.keySet()) {
+                if (state.get(key) == null) {
+                    return "null";
+                }
+                sb.append(key + ": " + state.get(key));
+                sb.append("\n");
+            }
+            return sb.toString();
+        }
+    }
+
+    abstract public class Lattice {
+        abstract boolean compareTo(Lattice other);
+
+        abstract Lattice join(Lattice other);
+    }
+
+    class Top extends Lattice {
+        // this <= other
+        @Override
+        public boolean compareTo(Lattice other) {
+            if (other instanceof Top) {
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public Lattice join(Lattice other) {
+            return this;
+        }
+
+        @Override
+        public String toString() {
+            return "?";
+        }
+    }
+
+    class Bottom extends Lattice {
+        // this <= other
+        @Override
+        public boolean compareTo(Lattice other) {
+            if (other instanceof Bottom) {
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public Lattice join(Lattice other) {
+            return other;
+        }
+
+        @Override
+        public String toString() {
+            return "B";
+        }
+    }
+
+    class NotNull extends Lattice {
+        // this <= other
+        @Override
+        public boolean compareTo(Lattice other) {
+            if (other instanceof Top || other instanceof NotNull) {
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        @Override
+        public Lattice join(Lattice other) {
+            if (other instanceof Null || other instanceof Top) {
+                return new Top();
+            } else {
+                return this;
+            }
+        }
+
+        @Override
+        public String toString() {
+            return "+";
+        }
+    }
+
+    class Null extends Lattice {
+        // this <= other
+        @Override
+        public boolean compareTo(Lattice other) {
+            if (other instanceof Top || other instanceof Null) {
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        @Override
+        public Lattice join(Lattice other) {
+            if (other instanceof NotNull || other instanceof Top) {
+                return new Top();
+            } else {
+                return this;
+            }
+        }
+
+        @Override
+        public String toString() {
+            return "0";
+        }
+    }
+
+    syn AbstractState IRCodeBB.trans(AbstractState s) {
+        AbstractState newState = s.newState();
+        for (IRInsn inst : getIRInsns()) {
+            newState = inst.trans(newState);
+        }
+        return newState;
+    }
+
+    syn AbstractState IRInsn.trans(AbstractState s) {
+        return s;
+    }
+
+    eq IRConstantInsn.trans(AbstractState s) {
+        IRVarRef dst = getDst();
+        IRConstant src = getSrc();
+        Lattice l1 = s.getLattice(dst.getIRVar());
+        Lattice l2 = null;
+        if (src instanceof IRNull) {
+            l2 = new Null();
+        } else {
+            l2 = new NotNull();
+        }
+        AbstractState newState = s.newState();
+        Lattice l3 = l2;
+        newState.setLattice(dst.getIRVar(), l3);
+        return newState;
+    }
+
+    eq IRCopyInsn.trans(AbstractState s) {
+        IRVarRef dst = getDst();
+        IRVarRef src = getSrc();
+        Lattice l1 = s.getLattice(dst.getIRVar());
+        Lattice l2 = s.getLattice(src.getIRVar());
+        AbstractState newState = s.newState();
+        Lattice l3 = l2;
+        newState.setLattice(dst.getIRVar(), l3);
+        return newState;
+    }
+
+    eq IRCallInsn.trans(AbstractState s) {
+        IRVarRef dst = getDst();
+        IRFunRef ref = getIRFunRef();
+        IRFunction fun = ref.getIRFunction();
+        IRType returnRef = (IRType) fun.getIRTypeRef();
+        AbstractState newState = s.newState();
+        if (returnRef.isNonNull()) {
+            newState.setLattice(dst.getIRVar(), new NotNull());
+        } else {
+            newState.setLattice(dst.getIRVar(), new Top());
+        }
+        return newState;
+    }
+
+    eq IRLoadArrayInsn.trans(AbstractState s) {
+        IRVarRef dst = getDst();
+        IRVarRef base = getBase();
+        IRType type = (IRType) base.getIRVar().getIRTypeRef();
+        AbstractState newState = s.newState();
+        boolean isNonNull = false;
+        for (IRTypeRef ref : type.getTypeActuals()) {
+            IRType t = (IRType) ref;
+            if (t.isNonNull()) {
+                isNonNull = true;
+            }
+        }
+        if (isNonNull) {
+            newState.setLattice(dst.getIRVar(), new NotNull());
+        } else {
+            newState.setLattice(dst.getIRVar(), new Top());
+        }
+        return newState;
+    }
+
+    eq IRStoreArrayInsn.trans(AbstractState s) {
+        IRVarRef src = getSrc();
+        IRVarRef base = getBase();
+        IRType type = (IRType) src.getIRVar().getIRTypeRef();
+        AbstractState newState = s.newState();
+        Lattice l = s.getLattice(src.getIRVar());
+        newState.setLattice(base.getIRVar(), l);
+        return newState;
+    }
+}

@@ -1,0 +1,28 @@
+fun f() = {
+  return 0;
+}
+
+fun g(): nonnull int = {
+  return 0;
+}
+
+fun main() = {
+  var x: nonnull int := 1;
+  var y: nonnull int := 2;
+  var z := 3;
+  var a: nonnull int := 4;
+  a := f();
+  var b: nonnull int := 5;
+  var arr := new array[int](1);
+  b := arr[0];
+  if (z > 1) {
+    x := null;
+    z := y;
+  }
+  z := x;
+  y := null;
+  a := g();
+  var arr2 := new array[nonnull int](1);
+  b := arr2[0];
+}
+

@@ -1,0 +1,112 @@
+import lang.common.SourceLocation;
+
+aspect IR {
+	public IRInsn IRInsn.setInsnSourceLocation(SourceLocation srcloc) {
+		this.setSourceLocation(srcloc);
+		return this;
+	}
+
+	public IRVarRef IRVar.ref() {
+		return new IRVarRef(this);
+	}
+
+	public IRFunRef IRFunction.ref() {
+		return new IRFunRef(this);
+	}
+
+	public static IRBuiltinTypeCon IRBuiltinTypeCon.newBuiltinIRType(String name) {
+		IRBuiltinTypeCon c = new IRBuiltinTypeCon().setIRName(new IRName(name));
+		c.setSourceLocation(SourceLocation.BUILTIN);
+		return c;
+	}
+
+
+	public static IRTypeCon IRModule.IntegerType = IRBuiltinTypeCon.newBuiltinIRType("int");
+	public static IRTypeCon IRModule.StringType = IRBuiltinTypeCon.newBuiltinIRType("string");
+	public static IRTypeCon IRModule.AnyType = IRBuiltinTypeCon.newBuiltinIRType("any");
+	public static IRTypeCon IRModule.ArrayType = IRBuiltinTypeCon.newBuiltinIRType("array")
+		.addIRTypeFormal(new IRTypeFormal(new IRName("T")));
+
+	public static IRType IRModule.makeIntegerTypeRef() {
+		return new IRType(IRModule.IntegerType, new List(), new List());
+	}
+
+	public static IRType IRModule.makeStringTypeRef() {
+		return new IRType(IRModule.StringType, new List(), new List());
+	}
+
+	public static IRType IRModule.makeAnyTypeRef() {
+		return new IRType(IRModule.AnyType, new List(), new List());
+	}
+
+	public static IRType IRModule.makeArrayTypeRef() {
+		return new IRType().setIRTypeCon(IRModule.ArrayType);
+	}
+
+	public String IRModule.defaultName = "main";
+
+	syn nta List<IRTypeCon> IRModule.builtinTypes() {
+		List<IRTypeCon> btypes = new List<>();
+		btypes.add(IntegerType);
+		btypes.add(StringType);
+		btypes.add(AnyType);
+		return btypes;
+	}
+
+	inh int IRCodeBB.getNumber();
+
+	// Get a Basic Block by its block number
+	eq IRFunction.getIRCodeBB(int i).getNumber() = i;
+	syn String IRCodeBB.label() = "bb" + getNumber();
+
+	private SourceLocation ASTNode.srcLoc = SourceLocation.UNKNOWN;
+	public void ASTNode.setSourceLocation(SourceLocation srcLoc) {
+		this.srcLoc = srcLoc;
+	}
+
+	/**
+	 * Get the corresponding program location in the source code
+	 *
+	 * Most IR instructions retain a reference to the source code
+	 * location from which the compiler generated them, obtainable here.
+	 *
+	 * SourceLocation provides methods such as getStartLine() and getStartColumn().
+	 */
+	public SourceLocation ASTNode.getSourceLocation() {
+		return srcLoc;
+	}
+
+	syn boolean IRQualifier.isNonNull() = false;
+	eq IRNonNull.isNonNull() = true;
+
+	/**
+	* isNonNull - true iff the type is nonnull-qualified
+	*/
+	syn boolean IRType.isNonNull() {
+		for (IRQualifier q : getIRQualifiers()) {
+			if (q.isNonNull())
+				return true;
+		}
+		return false;
+	}
+
+	public void IRType.markNonNull() {
+		if (isNonNull()) {
+			// nothing to do
+			return;
+		}
+		addIRQualifier(new IRNonNull());
+	}
+
+	/**
+	 * Is this function a built-in one?
+	 *
+	 * Return its name if so.
+	 */
+	syn String IRFunction.getBuiltinName() {
+		if (getNumIRCodeBB() > 0) {
+			return null;
+		}
+		return this.getIRName().getString();
+	}
+}

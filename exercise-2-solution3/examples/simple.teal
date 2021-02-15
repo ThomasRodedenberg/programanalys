@@ -1,0 +1,8 @@
+fun main() = {
+    var x : nonnull int := 5; // N 2 27 =, N 2 4 +
+    var y : nonnull int := null; // N 3 27 =, N 3 4 0
+    var z := 3; // N 4 13 =, N 4 4 =
+    x := y; // N 5 4 0
+    z := x; // N 6 4 =
+    // N 0 0 =
+}

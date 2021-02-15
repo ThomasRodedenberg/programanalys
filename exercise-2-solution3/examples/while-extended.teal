@@ -1,0 +1,26 @@
+fun check(a0: nonnull int, a1 : nonnull int, a2: nonnull int) = {
+    return 1;
+}
+
+fun main () = {
+    var v := 1;
+    var w := 1;
+    var x := 0;
+    var y := 0;
+    var z := 0;
+    var n := null;
+
+    v := z;
+    while x < 10 {
+        var a := 1;
+        x := y;
+        while x > y {
+	   y := a;
+	   a := z;
+	   w := v;
+	}
+        z := n;
+    }
+    check(v, w, x);
+    check(y, z, n);
+}

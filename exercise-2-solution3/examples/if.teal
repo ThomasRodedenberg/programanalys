@@ -1,0 +1,10 @@
+fun main () = {
+    var x : nonnull int := 4; // N 2 27 =, N 2 5 +
+    if (0 < 1) { // N 3 8 =, N 3 12 =, NC 3 7 ++
+       x := null; // N 4 12 =, N 4 7 0
+    } else {
+       x := 1; // N 6 12 =, N 6 7 +
+    }
+    var y : nonnull int := x;
+    return x; // N 0 0 =
+}
