@@ -1,0 +1,70 @@
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.lang.reflect.InvocationTargetException;
+
+// We have been careful to not import many types here because the imports are added for
+// _ALL_ AST nodes and can cause collisions in the abstract grammar namespace.
+
+/**
+ * General-purpose reflexive AST printer
+ */
+aspect DumpTree {
+	private static final String ASTNode.DUMP_TREE_INDENT = "  ";
+	private static final boolean ASTNode.PRINT_NODE_IDS = false; // generate unique AST node IDs
+	private static int ASTNode.uniqueNodeIdCounter = 0;
+
+	// Thanks to attribute caching, this will generate unique node IDs
+	syn int ASTNode.uniqueNodeId() { return uniqueNodeIdCounter++; }
+
+	public String ASTNode.dumpTree() {
+		ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+		dumpTree(new PrintStream(bytes));
+		return bytes.toString();
+	}
+
+	public void ASTNode.dumpTree(PrintStream out) {
+		dumpTree(out, "");
+		out.flush();
+	}
+
+	public void ASTNode.dumpTree(PrintStream out, String indent) {
+		String prefix = indent;
+		if (ASTNode.PRINT_NODE_IDS) {
+			prefix += String.format("#%x:", this.uniqueNodeId());
+		}
+		out.print(prefix + getClass().getSimpleName());
+		out.println(getTokens());
+		String childIndent = indent + DUMP_TREE_INDENT;
+		for (ASTNode child : astChildren()) {
+			if (child == null) {
+				out.println(childIndent + "null");
+			} else {
+				child.dumpTree(out, childIndent);
+			}
+		}
+	}
+
+	public String ASTNode.getTokens() {
+		java.util.TreeSet<java.lang.reflect.Method> methods = new java.util.TreeSet<>(
+				new java.util.Comparator<java.lang.reflect.Method>() {
+					public int compare(java.lang.reflect.Method m1, java.lang.reflect.Method m2) {
+						return m1.getName().compareTo(m2.getName());
+					}
+				});
+
+		methods.addAll(java.util.Arrays.asList(getClass().getMethods()));
+
+		String result = "";
+		for (java.lang.reflect.Method method : methods) {
+			ASTNodeAnnotation.Token token = method.getAnnotation(ASTNodeAnnotation.Token.class);
+			if (token != null) {
+				try {
+					result += String.format(" %s=\"%s\"", token.name(), method.invoke(this));
+				} catch (IllegalAccessException ignored) {
+				} catch (InvocationTargetException ignored) {
+				}
+			}
+		}
+		return result;
+	}
+}

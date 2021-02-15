@@ -1,0 +1,42 @@
+aspect SemanticCheck {
+	eq MemberAccess.isLValue() = true;
+	eq TypeVarDecl.kind() = "type variable";
+	eq TypeDecl.kind() = "type";
+
+	Type contributes new DeclKindError("type", getIdUse().lookup().getDecl().kind(), name(), sourceLocation())
+		when !getIdUse().lookup().isUnknown()
+		  && !(getIdUse().lookup().getDecl().isTypeDecl() || getIdUse().lookup().getDecl().isTypeVarDecl())
+		to Program.semanticErrors();
+
+	syn boolean Type.hasNonNullQualifier() {
+		for (TypeQualifier q : getTypeQualifiers()) {
+			if (q instanceof NonNullQualifier) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	VarDecl contributes new SemanticError(sourceLocation(), "Global variable types cannot be qualified.")
+		when hasDeclaredType() && getDeclaredType().hasNonNullQualifier() && getScope() == VariableScope.GLOBAL to Program.semanticErrors();
+
+	inh boolean VarDecl.isFormalParameterDecl();
+	eq FunDecl.getFormal(int i).isFormalParameterDecl() = true;
+	eq Program.getChild(int i).isFormalParameterDecl() = false;
+
+	VarDecl contributes new SemanticError(sourceLocation(), "Qualified local variabes must be initialized.")
+		when (!hasInitializer()) && (!isFormalParameterDecl()) &&
+		hasDeclaredType() && getDeclaredType().hasNonNullQualifier() && getScope() == VariableScope.LOCAL to Program.semanticErrors();
+
+	Type contributes new SemanticError(sourceLocation(), "Actual type parameters are disallowed for types other than array[T].")
+		when !isArray() && getNumActual() != 0 to Program.semanticErrors();
+
+	Type contributes new SemanticError(sourceLocation(), "Instances of array[T] take a single type parameter.")
+		when isArray() && getNumActual() != 1 to Program.semanticErrors();
+
+	TypeDecl contributes new SemanticError(sourceLocation(), "User defined type cannot have formal type parameters.")
+		when !isArray() && getNumTypeFormal() != 0 to Program.semanticErrors();
+
+	MemberAccess contributes new SemanticError(sourceLocation(), "Access of unknown field, '" + getIdentifier() + "'. Consider using type annotations.")
+		when getExpr().type().memberLookup(getIdentifier()) == null to Program.semanticErrors();
+}

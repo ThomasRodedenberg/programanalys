@@ -1,0 +1,15 @@
+// Type Variables
+TypeVarDecl : Decl ::= IdDecl;
+
+// Type declarations
+TypeDecl : Decl ::= IdDecl TypeFormal:TypeVarDecl* FunFormal:VarDecl*;
+
+// Qualifiers
+abstract TypeQualifier;
+NonNullQualifier : TypeQualifier;
+
+// Type uses
+Type ::= IdUse Actual:Type* TypeQualifier*;
+
+// Member access
+MemberAccess : Expr ::= Expr <Identifier>;

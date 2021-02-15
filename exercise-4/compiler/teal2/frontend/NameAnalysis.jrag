@@ -1,0 +1,59 @@
+import java.util.HashMap;
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Collection;
+
+aspect NameAnalysis {
+	syn Decl Type.decl() = getIdUse().lookup().getDecl();
+
+	inh IdDecl Type.lookup(String s);
+
+	eq TypeDecl.getFunFormal().lookup(String s) {
+		// search in the type formals first
+		for (TypeVarDecl typeVar : getTypeFormals()) {
+			if (typeVar.name().equals(s))
+				return typeVar.getIdDecl();
+		}
+		return lookup(s);
+	}
+
+	inh IdDecl TypeDecl.lookup(String s);
+
+	eq TypeDecl.getIdDecl().getDecl() = this;
+	eq TypeVarDecl.getIdDecl().getDecl() = this;
+}
+
+aspect NameAnalysisPrivate {
+	/**
+	   For type, class and interface declarations: the type paramaters,
+	   constructor parameters, method names and variable declarations
+	   share a single namespace.
+	 **/
+	syn MultiHashMap<String, IdDecl> TypeDecl.localDeclMap() {
+		MultiHashMap<String, IdDecl> declMap = super.localDeclMap();
+		for (VarDecl d : getFunFormals()) {
+			IdDecl decl = d.getIdDecl();
+			declMap.append(decl.getIdentifier(), decl);
+		}
+		return declMap;
+	}
+
+	syn IdDecl Decl.memberLookup(String s) = null;
+	eq TypeDecl.memberLookup(String s) {
+		IdDecl d = localDeclMap().getOne(s);
+		return d;
+	}
+
+	eq TypeVarDecl.memberLookup(String s) {
+		// TODO: implement once TEAL supports type bounds
+		return null;
+	}
+
+	syn String Type.name() {
+		return getIdUse().getIdentifier();
+	}
+}
+
+aspect NameAnalysisCheck {
+}

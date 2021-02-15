@@ -1,0 +1,56 @@
+// Teal-0 parsing and program representation
+module("teal-0") {
+    moduleName "teal-0"
+
+    java {
+	basedir "."
+	include "java/**/*.java"
+    }
+
+    jastadd {
+	include "ast/toplevel.ast", [-1]
+	include "ast/type.ast"
+	include "ast/teal0.ast"
+
+	// Meta-information
+	include "frontend/Version.jrag"
+
+	// Semantic analysis
+	include "frontend/BuiltinTypes.jrag"
+	include "frontend/DumpTree.jrag"
+	include "frontend/Modules.jrag"
+	include "frontend/Util.jrag"
+	include "frontend/Decl.jrag"
+	include "frontend/Source.jrag"
+	include "frontend/NameAnalysis.jrag"
+	include "frontend/SemanticCheck.jrag"
+	include "frontend/TypeAnalysis.jrag"
+	include "frontend/TypeAnalysisBuiltinTypes.jrag"
+
+	// Code generation
+	include "backend/IRGen.jrag"
+	include "backend/IRGenType.jrag"
+	include "backend/IRGenBuiltinType.jrag"
+	include "backend/IRGenExpr.jrag"
+    }
+
+    scanner {
+	include "scanner/header.flex", [-2]
+	include "scanner/type.flex", [-1]
+	include "scanner/scanner.flex"
+	include "scanner/id.flex", [1]
+	include "scanner/footer.flex", [2]
+    }
+
+    parser {
+	include "parser/header.parser", [-1]
+	include "parser/module.parser"
+	include "parser/decl.parser"
+	include "parser/decl-base.parser"
+	include "parser/type.parser"
+	include "parser/stmt-base.parser"
+	include "parser/stmt.parser"
+	include "parser/expr.parser"
+	include "parser/term.parser"
+    }
+}
