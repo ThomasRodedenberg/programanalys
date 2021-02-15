@@ -1,9 +1,0 @@
-// Declarations
-
-Decl decl = var_decl
-          | fun_decl
-          ;
-
-FunDecl fun_decl = concrete_fun_decl
-                 ;
-

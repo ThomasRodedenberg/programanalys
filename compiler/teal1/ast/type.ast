@@ -1,1 +1,0 @@
-NonNullType : Type ::= Type;

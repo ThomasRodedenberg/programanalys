@@ -1,2 +1,0 @@
-ForStmt for_stmt = FOR var_id_decl IN expr block_stmt {: return new ForStmt(var_id_decl, expr, block_stmt); :}
-                 ;

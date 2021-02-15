@@ -1,5 +1,0 @@
-abstract Type;
-IntType : Type;
-StringType : Type;
-AnyType : Type;
-ArrayType : Type ::= Actual:Type;

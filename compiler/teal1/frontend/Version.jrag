@@ -1,4 +1,0 @@
-// Meta-information
-aspect Version {
-	refine Version eq Program.tealLayer() = 1; // Teal-1
-}

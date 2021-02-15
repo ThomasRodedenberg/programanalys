@@ -1,8 +1,0 @@
-aspect IRGenType {
-	eq NonNullType.genIRTypeRef() {
-		Type qualifiedType = getType();
-		IRType t = (IRType) qualifiedType.genIRTypeRef();
-		t.addIRQualifier(new IRNonNull());
-		return t;
-	}
-}
