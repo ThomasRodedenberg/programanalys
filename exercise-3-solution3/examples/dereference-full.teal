@@ -1,0 +1,36 @@
+type T(x : string, y : int);
+
+
+fun f(a : nonnull array[int], y : int) : int = {
+  if y < 0 {
+    return -1;
+  }
+
+  return a[y];
+}
+
+fun main() = {
+  var a : T := new T("", f(null, -1));
+  var b : T := new T("", 0);
+  var c : nonnull T := b;
+  var d : T := new T("", null);
+
+  b := null;
+  d := c;
+  b := a;
+
+  f([1, 2], a.y);
+  f([1, 2], b.y);
+  f([1, 2], c.y);
+  f([1, 2], d.y);
+
+  var aa := [];
+  if 1 {
+    aa := null;
+  }
+  aa[0] := 1;
+  var bb := aa[0];
+
+  a.y := 1;
+  return b.x;
+}

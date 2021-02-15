@@ -1,0 +1,47 @@
+merge: 1 7 19
+N 4 6 -> null 13 27
+N 4 6 -> obj 22 4
+N 4 6 -> obj 23 4
+N 4 6 -> obj 24 4
+N 4 6 -> obj 25 4
+maybe: NI 9 9 -> obj 6 11
+maybe: NI 9 9 -> obj 13 21
+maybe: NI 9 9 -> obj 13 33
+maybe: NI 9 9 -> obj 14 21
+maybe: NI 9 9 -> obj 14 25
+maybe: NI 9 9 -> obj 16 21
+NI 9 9 -> null 16 25
+maybe: NI 9 9 -> obj 22 5
+maybe: NI 9 9 -> obj 22 8
+maybe: NI 9 9 -> obj 23 5
+maybe: NI 9 9 -> obj 23 8
+maybe: NI 9 9 -> obj 24 5
+maybe: NI 9 9 -> obj 24 8
+maybe: NI 9 9 -> obj 25 5
+maybe: NI 9 9 -> obj 25 8
+maybe: NI 9 9 -> obj 34 9
+maybe: NA 9 9 -> null 13 27
+maybe: NA 9 9 -> obj 22 4
+maybe: NA 9 9 -> obj 23 4
+maybe: NA 9 9 -> obj 24 4
+maybe: NA 9 9 -> obj 25 4
+N 15 2 -> obj 13 15
+N 15 2 -> obj 14 15
+N 15 2 -> null 18 7
+maybe: NO 23 12 -> obj 13 15
+maybe: NO 23 12 -> obj 14 15
+maybe: NO 23 12 -> null 18 7
+maybe: NO 24 12 -> obj 13 15
+maybe: NO 24 12 -> obj 14 15
+maybe: NO 24 12 -> null 18 7
+maybe: NO 25 12 -> obj 13 15
+maybe: NO 25 12 -> obj 14 15
+maybe: NO 25 12 -> obj 16 15
+NO 25 12 -> null 18 7
+maybe: NA 31 2 -> obj 27 12
+NA 31 2 -> null 29 10
+maybe: NA 32 12 -> obj 27 12
+NA 32 12 -> null 29 10
+maybe: NO 35 9 -> obj 13 15
+maybe: NO 35 9 -> obj 14 15
+maybe: NO 35 9 -> null 18 7

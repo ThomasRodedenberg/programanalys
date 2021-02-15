@@ -1,0 +1,16 @@
+type T(a: int, b: int);
+type C(x: int);
+
+fun main() = {
+  var x: nonnull T := new T(1, 2);
+  var z: nonnull T := new C(2);
+  var y: nonnull T := new T(2, 2);
+  z := x;
+  if (1 < 2) {
+    z := null;
+  }
+  y := new T(3, 3);
+  x := y;
+  var v: nonnull T := x;
+  return 0;
+}

@@ -1,0 +1,29 @@
+merge: 1 9 18 27
+N 8 2 -> obj 4 17
+N 8 2 -> obj 4 25
+N 8 2 -> obj 4 28
+N 8 2 -> null 4 31
+N 8 2 -> obj 5 7
+N 8 2 -> obj 5 15
+N 8 2 -> obj 5 18
+maybe: NO 10 10 -> obj 4 17
+maybe: NO 10 10 -> obj 4 25
+maybe: NO 10 10 -> obj 4 28
+maybe: NO 10 10 -> null 4 31
+maybe: NO 10 10 -> obj 5 7
+maybe: NO 10 10 -> obj 5 15
+maybe: NO 10 10 -> obj 5 18
+maybe: NO 11 17 -> obj 4 17
+maybe: NO 11 17 -> obj 4 25
+maybe: NO 11 17 -> obj 4 28
+maybe: NO 11 17 -> null 4 31
+maybe: NO 11 17 -> obj 5 7
+maybe: NO 11 17 -> obj 5 15
+maybe: NO 11 17 -> obj 5 18
+maybe: NO 12 10 -> obj 4 17
+maybe: NO 12 10 -> obj 4 25
+maybe: NO 12 10 -> obj 4 28
+maybe: NO 12 10 -> null 4 31
+maybe: NO 12 10 -> obj 5 7
+maybe: NO 12 10 -> obj 5 15
+maybe: NO 12 10 -> obj 5 18

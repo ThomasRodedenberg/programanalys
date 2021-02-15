@@ -1,0 +1,1216 @@
+// A pointer analysis that tries to
+// detect when a heap reference points to
+// null, if it's supposed to be non-null!
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
+
+// Andersen's analysis requires three steps:
+// (1) Fact Extraction: find relevant facts and encode in graph
+// (2) Solving: generate additional graph edges to propagate information
+// (3) Reporting: print output
+aspect NonNullPointerAnalysis {
+
+    /**
+     * Helper function for debugging fact extraction information, easy to flip on/off
+     */
+    public static void IRProgram.debugNNA(Object s) {
+	// Fact extraction
+		System.out.println(s + "");
+    }
+
+    /**
+     * Helper function for debuggong out Andersen propagation information, easy to flip on/off
+     */
+    public static void IRProgram.debugNNAPropagate(Object s) {
+	// Andersen
+		// System.out.println(s + "");
+    }
+
+    /**
+     * For array dereferencing, this allows us to see if the array components are nonnull.
+     * Not strictly needed for the exercise, but helps catch more bugs.
+     */
+    public IRType IRTypeRef.componentType() {
+		return IRModule.makeAnyTypeRef();
+    }
+
+    public IRType IRType.componentType() {
+		if (this.getNumTypeActual() == 1) {
+			return (IRType) this.getTypeActual(0);
+		}
+		return IRModule.makeAnyTypeRef();
+    }
+
+    /**
+     * Is a given type NonNull?
+     */
+	syn boolean IRTypeRef.isNotNullable() = false;
+
+    eq IRType.isNotNullable() {
+		for (IRQualifier q : this.getIRQualifiers()) {
+			if (q.isNonNull()) {
+				return true;
+			}
+		}
+		return false;
+    }
+
+    /**
+     * A vertex in our graph can be:
+     * - a variable (e.g. "x")
+     * - a dereferenced variable (notation "x.[]" on the slides; this can correspond e.g. to "x.f")
+     * - allocation site of an object ("new ...") or a literal value (number or string)
+     * FIXME: Make sure to also support the following:
+     * - a "null"
+     * - ...perhaps something else that helps us deal with the "NO", "NI", and "NA" errors?  (Need not be related to Vertex, but could be...)
+     */
+    public class Vertex {
+		// List of ALL edges that this vertex is the source or target for (this is independent of the Andersen Worklist)
+        private ArrayList<Edge> edges;
+		private IRTypeRef ty; // Type or null
+		protected SourceLocation location; // Source location, or null
+
+		// To simplify debugging, we give unique sequential numbers to each vertex (only used in toString())
+		private static int vertex_id_counter = 0;
+		protected int vertex_id = vertex_id_counter++;
+
+		public int vertexId() {
+			return vertex_id;
+		}
+
+		private boolean isConstant = false;
+
+		public boolean getIsConstant() {
+			return isConstant;
+		}
+
+		public void setConstant() {
+			isConstant = true;
+		}
+
+
+		private DereferenceVertex deref = null;
+
+		private HashSet<IRVar> fields = new HashSet<>();
+
+		public void addField(IRVar var) {
+			fields.add(var);
+		}
+
+		public HashSet<IRVar> getFields() {
+			return fields;
+		}
+
+		public IRTypeRef getTypeRef() {
+			return ty;
+		}
+
+		// for Vertex "x", this returns "x.[]"
+		public DereferenceVertex getDereference() {
+			if (this.deref == null) {
+			    this.deref = new DereferenceVertex(this.ty.componentType(), this);
+			}
+			return this.deref;
+		}
+
+		public boolean hasDereference() {
+			return this.deref != null;
+		}
+
+		public Vertex(IRTypeRef ty) {
+			if (ty == null) {
+				ty = IRModule.makeAnyTypeRef();
+			}
+			this.ty = ty;
+			this.edges = new ArrayList();
+			IRType type = (IRType) ty;
+			IRTypeCon typeCon = type.getIRTypeCon();
+			if (typeCon instanceof IRClass) {
+				IRClass irClass = (IRClass) typeCon;
+				for (IRVar var : irClass.getIRVars()) {
+					addField(var);
+				}
+			}
+		};
+
+		// for Vertex "x.[]", this returns "x" or null
+		public Vertex getReference() {
+			return null;
+		}
+
+		/**
+		 * Does the type of this vertex mark it as being non-nullable?
+		 */
+		public boolean isNotNullable() {
+			return this.ty.isNotNullable();
+		}
+
+		/**
+		 * Does this vertex represent a null value?
+		 */
+		public boolean isNull() {
+			return false;
+		}
+
+		/**
+		 * Is this vertex associated with a real program location? (i.e., not a bult-in operation or internal temporary variable)
+		 */
+		public boolean atRealLocation() {
+			return this.location != null && this.location.isReal();
+		}
+
+		/**
+		 * Add an edge that this vertex is contained in (used by the Edge class)
+		 */
+		public void registerEdge(Edge e) { edges.add(e); }
+
+		/**
+		 * All edges that this vertex is contained in
+		 */
+		public java.util.Collection<Edge> getEdges() {
+			return this.edges;
+		}
+
+		/**
+		 * Helper function for generating an iterator over all source/target vertices for any edge type
+		 */
+		private Iterable<Vertex> findEdges(Class<?> edgetype, boolean in_edge) {
+			return new Iterable<Vertex>() {
+				public Iterator<Vertex> iterator() {
+					return new Iterator<Vertex>() {
+					private ArrayList<Edge> edges_copy = new ArrayList<>(Vertex.this.edges);
+					private Iterator<Edge> it = edges_copy.iterator();
+					private Vertex next_vertex = null;
+
+					public boolean hasNext() {
+						if (next_vertex != null) {
+						return true;
+						}
+						while (it.hasNext()) {
+						Edge edge = it.next();
+						Vertex v;
+						Vertex result;
+						if (in_edge) {
+							v = edge.getTarget();
+							result = edge.getSource();
+						} else {
+							v = edge.getSource();
+							result = edge.getTarget();
+						}
+						IRProgram.debugNNAPropagate("     " + edge + " : t="
+								+ edgetype.isInstance(edge) + " && dir="
+								+ (v == Vertex.this)
+								+ "  >> " + result);
+						if (edgetype.isInstance(edge) && v == Vertex.this) {
+							IRProgram.debugNNAPropagate("   (candidate)");
+							next_vertex = result;
+							return true;
+						}
+						}
+						return false;
+					}
+
+					public Vertex next() {
+						if (!hasNext()) {
+						throw new java.util.NoSuchElementException();
+						}
+						Vertex v = this.next_vertex;
+						this.next_vertex = null;
+						return v;
+					}
+					};
+				}
+			};
+		}
+
+		/**
+		 * Finds all vertices to which we know outgoing points-to edges
+		 */
+		public Iterable<Vertex> getOutgoingPointsToEdges() {  return findEdges(PointsToEdge.class, false); }
+
+		/**
+		 * Finds all vertices to which we know outgoing inclusion edges
+		 */
+		public Iterable<Vertex> getOutgoingInclusionEdges() {  return findEdges(InclusionEdge.class, false); }
+
+		/**
+		 * Finds all vertices from which we know incoming points-to edges
+		 */
+		public Iterable<Vertex> getIncomingPointsToEdges() {  return findEdges(PointsToEdge.class, true); }
+
+		/**
+		 * Finds all vertices from which we know incoming inclusion edges
+		 */
+		public Iterable<Vertex> getIncomingInclusionEdges() {  return findEdges(InclusionEdge.class, true); }
+
+		public Vertex setLocation(SourceLocation loc) {
+			this.location = loc;
+			return this;
+		}
+
+		/**
+		 * Does this node represent a dereference of another node (i.e., is it the "f.[]" of some "f")?
+		 */
+		public boolean isDereference() {
+			return false;
+		}
+
+		/**
+		 * Node stringification captures::
+		 * - globally unique node index
+		 * - node location (in parentheses)
+		 * - marker "null" if node is null
+		 * - type (if set and not "any")
+		 */
+		@Override
+		public String toString() {
+			String retval = "#" + this.vertex_id;
+			if (this.location != null) {
+				if (this.location.isReal()) {
+					retval = "$" + this.vertex_id + "(" + this.location.getStartLine() + ":" + this.location.getStartColumn() + ")";
+				}
+				} else {
+				retval += "?";
+				}
+			if (this.isNull()) {
+				retval = "null" + retval;
+			}
+			if (this.ty != null && !this.ty.toString().equals("any")) {
+				retval += ":" + this.ty.toString();
+			}
+			return retval;
+		}
+
+		/**
+		 * Are we pointing to a "null" node?
+		 */
+		public boolean pointsToNull() {
+			for (Vertex v : this.getOutgoingPointsToEdges()) {
+				if (v.isNull()) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		/**
+		 * line and column information suitable for Exercise 3
+		 */
+		public String locationString() {
+			if (this.location == null) {
+				return "? ?";
+			}
+			return this.location.getStartLine()
+				+ " "
+				+ this.location.getStartColumn();
+		}
+
+		/**
+		 * "null <line> <column>"
+		 * or
+		 * "obj <line> <column>"
+		 */
+		public String outputFormString() {
+			return (this.isNull() ? "null " : "obj ") + this.locationString();
+		}
+
+		/**
+		 * Is this worth printing?
+		 */
+		public boolean shouldBePrinted() {
+			return this.atRealLocation() && this.isNotNullable();
+		}
+    }
+
+
+    /**
+     * Vertex for "f.[]" style nodes
+     */
+    public class DereferenceVertex extends Vertex {
+		private Vertex parent;
+
+		/**
+		 * @param ty Node type
+		 * @param parent The "f" to our "f.[]"
+		 */
+		public DereferenceVertex(IRTypeRef ty, Vertex parent) {
+			super(ty);
+			this.parent = parent;
+		}
+
+		@Override
+		public boolean isDereference() {
+			return true;
+		}
+
+		@Override
+		public Vertex getReference() {
+			return this.parent;
+		}
+
+		@Override
+		public String toString() {
+			return parent.toString() + ".[]";
+		}
+    }
+
+	// FIXME: Remember to represent null vertices, too!
+	
+	public class NullVertex extends Vertex {
+
+		public NullVertex(IRTypeRef ty) {
+			super(ty);
+		}
+
+		@Override
+		public boolean isNull() {
+			return true;
+		}
+
+		@Override
+		public String toString() {
+			return "null";
+		}
+    }
+
+    /**
+     * We have two kinds of graph edges; PointsTo and Inclusion.
+     *
+     * This class captures their common operations.
+     */
+    public abstract class Edge {
+        Vertex source, target;
+
+        public Vertex getSource() {
+            return source;
+        }
+
+        public Vertex getTarget() {
+            return target;
+        }
+
+		/**
+		 * Create a fresh edge
+		 */
+        public Edge(Vertex source, Vertex target) {
+            this.source = source;
+            this.target = target;
+
+	    	this.registerEdgeWithVertices();
+        }
+
+		/**
+		 * Create a fresh edge but don't add it to the vertices yet.
+		 *
+		 * This can be useful if you e.g. want to check if you already have an equivalent edge lying aroud.
+		 * If you use this constructor, make sure to call "registerEdgeWithVertices()" once you decide to keep it!
+		 */
+        public Edge(Vertex source, Vertex target, boolean do_not_register) {
+            this.source = source;
+            this.target = target;
+        }
+
+		private boolean registered = false;
+
+		/**
+		 * Only called once, and only in combination with the "(Vertex, Vertex, boolean)" constructor
+		 */
+		public void registerEdgeWithVertices() {
+			if (this.registered) {
+				return;
+			}
+			this.source.registerEdge(this);
+			this.target.registerEdge(this);
+			this.registered = true;
+		}
+
+		/**
+		 * Custom hashCode so we can use the edge in HashSet and HashMap
+		 */
+		@Override
+		public int hashCode() {
+			return this.getSource().hashCode() ^ this.getTarget().hashCode();
+		}
+
+		/**
+		 * Custom equality check so we can compare edges for equality
+		 */
+		@Override
+		public boolean equals(Object other) {
+			if (!(other instanceof Edge)) {
+				return false;
+			}
+			Edge oedge = (Edge) other;
+			return oedge.getSource() == this.getSource()
+				&& oedge.getTarget() == this.getTarget();
+		}
+    }
+
+    /**
+     * Inclusion edge
+     * (The Green Arrow!)
+     * x --> y means pts(x) <= pts(y)
+     */
+    public class InclusionEdge extends Edge {
+        public InclusionEdge(Vertex source, Vertex target) {
+            super(source, target);
+        }
+
+        public InclusionEdge(Vertex source, Vertex target, boolean do_not_register) {
+            super(source, target, do_not_register);
+        }
+
+		@Override
+		public String toString() {
+			return this.getSource().toString() + " --> " + this.getTarget().toString();
+		}
+
+		/**
+		 * Custom hashCode so we can use the edge in HashSet and HashMap
+		 */
+		@Override
+		public int hashCode() {
+			return super.hashCode() + 17;
+		}
+
+		@Override
+		public boolean equals(Object other) {
+			return super.equals(other) && other instanceof InclusionEdge;
+		}
+    }
+
+    /**
+     * PointsToEdge
+     * (The Blue Arrow!)
+     * x ⇾ y means x points to the location y
+     */
+    public class PointsToEdge extends Edge {
+        public PointsToEdge(Vertex source, Vertex target) {
+            super(source, target);
+        }
+
+        public PointsToEdge(Vertex source, Vertex target, boolean do_not_register) {
+            super(source, target, do_not_register);
+        }
+
+		@Override
+		public String toString() {
+			return this.getSource().toString() + " ⇾ " + this.getTarget().toString();
+		}
+
+		/**
+		 * Custom hashCode so we can use the edge in HashSet and HashMap
+		 */
+		@Override
+		public int hashCode() {
+			return super.hashCode() + 23;
+		}
+
+		@Override
+		public boolean equals(Object other) {
+			return super.equals(other) && other instanceof PointsToEdge;
+		}
+	}
+
+	/**
+	 * The Andersen algorithm
+	 */
+	class AndersenGraph {
+		HashSet<Edge> worklist = new HashSet<Edge>();
+		HashSet<Edge> completed = new HashSet<Edge>();
+
+		// Tracking the vertices simplifies output generation
+		HashSet<Vertex> vertices = new HashSet<Vertex>();
+
+		public AndersenGraph(java.util.List<Edge> edges) {
+			worklist.addAll(edges);
+		}
+
+		public java.util.Collection<Vertex> getVertices() {
+			return this.vertices;
+		}
+
+		public HashSet<Edge> getCompleted() {
+			return this.completed;
+		}
+
+		/**
+		 * Extract next edge from worklist, or return null
+		 */
+		public Edge next() {
+			if (worklist.isEmpty()) {
+				return null;
+			}
+
+			Edge result = null;
+			for (Edge e : worklist) {
+				result = e;
+			}
+
+			worklist.remove(result);
+			return result;
+		}
+
+		/**
+		 * Propose a points-to edge (only added if it is new)
+		 *
+		 * You can use this code when you process the propagation rules (the rules that generate new edges).
+		 */
+		public void proposePointsToEdge(Vertex src, Vertex dst) {
+			this.add(new PointsToEdge(src, dst, false));
+		}
+
+		/**
+		 * Propose an inclusion edge (only added if it is new)
+		 *
+		 * You can use this code when you process the propagation rules (the rules that generate new edges).
+		 */
+		public void proposeInclusionEdge(Vertex src, Vertex dst) {
+			this.add(new InclusionEdge(src, dst, false));
+		}
+
+		private void add(Edge e) {
+			// FIXME: only add the edge if it doesn't already exist!  (Cf. the slides)
+			// Note that we store all the graph edges in the vertices, so these can act as our list of "completed" edges.
+			worklist.add(e);
+			// vertices.add(e.getSource());
+			// vertices.add(e.getTarget());
+		}
+
+		public void solve() {
+			ArrayList<Edge> edges = new ArrayList<>();
+			for (Edge e : this.worklist) {
+				edges.add(e);
+			}
+			HashSet<Edge> completed = new HashSet<>();
+			HashSet<Edge> newEdges = new HashSet<>();
+
+			do {
+
+				newEdges = new HashSet<>();
+
+				while (!edges.isEmpty()) {
+					Edge edge = edges.remove(0);
+		
+					completed.add(edge);
+					this.vertices.add(edge.getSource());
+					this.vertices.add(edge.getTarget());
+	
+					if (edge instanceof PointsToEdge) {
+						for (Edge other : completed) {
+							if (other instanceof InclusionEdge
+								&& other.getSource() == edge.getSource()
+								) {
+								Edge newEdge = new PointsToEdge(other.getTarget(), edge.getTarget(), false);
+								HashSet<Edge> allEdges = new HashSet<>();
+								allEdges.addAll(this.worklist);
+								allEdges.addAll(completed);
+								allEdges.addAll(newEdges);
+			
+								if (!allEdges.contains(newEdge)) {
+									newEdges.add(newEdge);
+									newEdge.registerEdgeWithVertices();
+								}
+							} else if (other instanceof InclusionEdge
+									&& other.getSource().isDereference()
+									&& other.getSource().getReference() == edge.getSource()
+									) {
+								Edge newEdge = new InclusionEdge(edge.getTarget(), other.getTarget(), false);
+								HashSet<Edge> allEdges = new HashSet<>();
+								allEdges.addAll(this.worklist);
+								allEdges.addAll(completed);
+								allEdges.addAll(newEdges);
+			
+								if (!allEdges.contains(newEdge)) {
+									newEdges.add(newEdge);
+									newEdge.registerEdgeWithVertices();
+								}
+							} else if (other instanceof InclusionEdge
+									&& other.getTarget().isDereference()
+									&& other.getTarget().getReference() == edge.getSource()
+									) {
+								Edge newEdge = new InclusionEdge(other.getSource(), edge.getTarget(), false);
+								HashSet<Edge> allEdges = new HashSet<>();
+								allEdges.addAll(this.worklist);
+								allEdges.addAll(completed);
+								allEdges.addAll(newEdges);
+			
+								if (!allEdges.contains(newEdge)) {
+									newEdges.add(newEdge);
+									newEdge.registerEdgeWithVertices();
+								}
+							}
+						}
+					}
+				}
+
+				edges.addAll(completed);
+				edges.addAll(newEdges);
+			} while (!newEdges.isEmpty());
+			
+			this.completed = new HashSet<>(completed);
+		}
+    }
+
+    /**
+     * Make it easy to figure out who the "owner function" of an instruction or basic block is
+     */
+    eq IRFunction.getIRCodeBB().ownerFunction() = this;
+    inh IRFunction IRCodeBB.ownerFunction();
+
+    eq IRCodeBB.getIRInsn().ownerFunction() = this.ownerFunction();
+    inh IRFunction IRInsn.ownerFunction();
+
+    eq IRCodeBB.getIRCodeExit().ownerFunction() = this.ownerFunction();
+    inh IRFunction IRCodeExit.ownerFunction();
+
+    // Building the graph
+
+    // There are four types of things we can do with
+    // Pointers:
+    // 1. Initialization: Creating a pointer
+    // 2. Aliasing: Assigning a pointer
+    // 3. Dereferencing read: For example, x := y.f;
+    // 4. Dereferencing write: For example, y.f := x;
+
+    // INITIALIZATION
+    // New Instructions are how we get new locations
+    // syn Vertex IRNewInsn.loc() { }
+    // syn Vertex IRNullInsn.loc() { }
+    // syn Edge IRNewInsn.edge() { }
+
+    // ALIASING
+    // syn Edge IRCallInsn.edge() { }
+    // What else?
+
+    // DEREFERENCING READ
+    // syn Edge IRLoadInsn.edge() { }
+
+
+    // DEREFERENCING WRITE
+    // syn Edge IRStoreInsn.edge() { }
+
+    // ----------------------------------------
+    // Vertices
+
+    // --------------------
+    // Functions
+    syn Vertex IRFunction.functionArg(int i) {
+		return new Vertex(this.getParamType(i)).setLocation(this.getParamType(i).getSourceLocation());
+    }
+
+    syn Vertex IRFunction.functionReturn() {
+		return new Vertex(this.getIRTypeRef()).setLocation(this.getSourceLocation());
+    }
+
+    syn Vertex IRInsn.functionArg(int i) {
+		return this.ownerFunction().functionArg(i);
+    }
+
+    syn Vertex IRInsn.functionReturn() {
+		return this.ownerFunction().functionReturn();
+    }
+
+    syn Vertex IRCodeExit.functionReturn() {
+		return this.ownerFunction().functionReturn();
+    }
+
+    // --------------------
+	// Variables and constants
+	
+    syn Vertex IRVar.loc() {
+		return new Vertex(this.getIRTypeRef()).setLocation(this.getSourceLocation());
+    }
+
+    syn Vertex IRVarRef.loc() {
+		return this.getIRVar().loc();
+    }
+
+    syn Vertex IRConstant.loc() {
+		Vertex v = new Vertex(null).setLocation(this.getSourceLocation());
+		v.setConstant();
+		return v;
+	}
+
+    eq IRNull.loc() {
+		Vertex v = new NullVertex(null).setLocation(this.getSourceLocation());
+		v.setConstant();
+		return v;
+    }
+
+	// The above defined vertices for variables and constants.  Do we need anything else?
+	
+
+    // ----------------------------------------
+    // Edges
+
+    // `edge' is convenient for adding single edges
+    syn Edge IRInsn.edge() = null;
+    // `multiEdge' is convenient if you have multiple edges at once
+    syn java.util.List<Edge> IRInsn.multiEdge() = null;
+
+    IRInsn contributes edge()
+		when edge() != null
+		to IRProgram.pointerGraphEdges();
+
+    IRInsn contributes multiEdge()
+		when multiEdge() != null
+		to IRProgram.pointerGraphEdgesMulti();
+
+    // FIXME: is it only IRInsn that produces edges?
+
+    // ---------------------
+    // Helpers
+
+    // If you construct your edges with these helpers, you can easily print out what's going on
+
+    public final void ASTNode.log(Edge v) {
+		// log vertex generation if desired
+		IRProgram.debugNNA("\t" + this);
+		IRProgram.debugNNA(v);
+    }
+
+    public final Edge ASTNode.pointsTo(Vertex from, Vertex toward) {
+		Edge e = new PointsToEdge(from, toward);
+		log(e);
+		return e;
+    }
+
+    public final Edge ASTNode.includesInto(Vertex from, Vertex toward) {
+		Edge e = new InclusionEdge(from, toward);
+		log(e);
+		return e;
+    }
+
+    // ---------------------
+    // Points-to
+    eq IRConstantInsn.edge() {
+		return pointsTo(this.getDst().loc(),
+				this.getSrc().loc().setLocation(this.getSourceLocation()));
+    }
+
+	// Any other instructions that generate pointsTo edges?
+
+	eq IRNewInsn.edge() {
+        return pointsTo(getDst().loc(),
+            new Vertex(getIRType()).setLocation(this.getSourceLocation()));
+	}
+	
+	eq IRNewArrayInsn.edge() {
+        return pointsTo(getDst().loc(),
+            new Vertex(getIRType()).setLocation(this.getSourceLocation()));
+    }
+
+    // ---------------------
+    // Direct inclusion
+    eq IRArgInsn.edge() {
+		return includesInto(this.functionArg(this.getIndex()).setLocation(null),
+					this.getDst().loc());
+    }
+
+	// Any other instructions that generate inclusion edges?
+	
+	eq IRCopyInsn.edge() {
+		Vertex head = getSrc().loc();
+		Vertex tail = getDst().loc();
+        return includesInto(head, tail);
+	}
+	
+    // IRCallInsn must handle a lot of edges at once; easiest to do with multiEdge
+    eq IRCallInsn.multiEdge() {
+		ArrayList<Edge> result = new ArrayList<>();
+        IRFunRef fun = getIRFunRef();
+
+		if (fun.getIRFunction().getIRCodeBBs().getNumChild() == 0) {
+			return result;
+		}
+
+		ArrayList<IRVarRef> params = new ArrayList<>();
+		for (IRCodeBB bb : fun.getIRFunction().getIRCodeBBs()) {
+			for (IRInsn i : bb.getIRInsns()) {
+				if (i instanceof IRArgInsn) {
+					IRArgInsn argInst = (IRArgInsn) i;
+					IRVarRef p = argInst.getDst();
+					params.add(p);
+				}
+			}
+		}
+
+		int i = 0;
+		for (IRVarRef arg : getArgs()) {
+			IRVarRef param = params.get(i);
+            result.add(new InclusionEdge(arg.loc(), param.loc()));
+            i++;
+        }
+
+		IRVarRef dst = getDst();
+        for (IRReturn ret : fun.getIRFunction().returns()) {
+            result.add(new InclusionEdge(ret.getIRVarRef().loc(), dst.loc()));
+		}
+
+        return result;
+	}
+	
+    coll ArrayList<IRReturn> IRFunction.returns() root IRFunction;
+
+    IRReturn contributes
+        this
+        to IRFunction.returns();
+
+
+    // ---------------------
+    // Dereferencing inclusion
+
+    // What dereferencing reads and writes do we have?
+    // Also remember to track "NO", "NI", and "NA" errors.  You can either try to think of a way
+    // to encode thse in the graph, or track them by postprocessing the generated graph.
+
+
+	// x = z;
+	// x = y.f;
+	// vertex: "y.[]"
+	// y.[] --> x
+	// after andersen:
+	// x -> y.[]
+	// x -> z
+    eq IRLoadInsn.edge() {
+        return this.includesInto(getBase().loc().getDereference(),
+		                         getDst().loc());
+	}
+	
+	eq IRLoadArrayInsn.edge() {
+        return this.includesInto(getBase().loc().getDereference(),
+		                         getDst().loc());
+	}
+
+    eq IRStoreInsn.edge() {
+		Vertex head = getSrc().loc();
+		Vertex tail = getBase().loc().getDereference();
+        return this.includesInto(head,
+								 tail);
+	}
+	
+	eq IRStoreArrayInsn.edge() {
+        return this.includesInto(getSrc().loc(),
+								 getBase().loc().getDereference());
+    }
+
+    // ----------------------------------------
+    // Computing the graph
+    coll ArrayList<Edge> IRProgram.pointerGraphEdges();
+	coll ArrayList<Edge> IRProgram.pointerGraphEdgesMulti() with addAll;
+	
+    public void IRProgram.expandGraph() {
+
+
+
+		// Part 1: Fact Extraction
+		ArrayList<Edge> edges = new ArrayList<>();
+		edges.addAll(pointerGraphEdges());
+		edges.addAll(pointerGraphEdgesMulti());
+
+		// Part 2: Solving
+		AndersenGraph g = new AndersenGraph(edges);
+		g.solve();
+
+		// Part 3 output
+
+		java.util.Collection<Vertex> vertices = g.getVertices();
+
+		for (Edge e : g.getCompleted()) {
+			Vertex v = e.getSource();
+			Vertex u = e.getTarget();
+			if (e instanceof PointsToEdge && v.shouldBePrinted()) {
+				System.out.println("N " + v.locationString() + " -> "
+					+ u.outputFormString());	
+			}
+		}
+
+		for (IRModule module : getIRModules()) {
+			for (IRTypeCon typeCon : module.getIRTypeCons()) {
+				if (typeCon instanceof IRClass) {
+					IRClass irClass = (IRClass) typeCon;
+					boolean oneFieldIsNonNull = false;
+					SourceLocation srcLoc = null;
+					for (IRVar var : irClass.getIRVars()) {
+						IRType t = (IRType) var.getIRTypeRef();
+						if (t.isNonNull()) {
+							oneFieldIsNonNull = true;
+							srcLoc = var.getSourceLocation();
+							break;
+						}
+					}
+
+					if (oneFieldIsNonNull) {
+						for (Edge e : g.getCompleted()) {
+							Vertex v = e.getSource();
+							Vertex u = e.getTarget();
+							String srcLocStr = srcLoc.getStartLine() + " " + srcLoc.getStartColumn();
+							if (e instanceof PointsToEdge &&
+									sameClass2((IRType) v.getTypeRef(), irClass) &&
+									u.getTypeRef().toString().equals("any")) {
+								System.out.println("N " + srcLocStr + " -> "
+									+ u.outputFormString());	
+							}
+						}
+					}
+				}
+			}
+		}
+
+		for (IRModule module : getIRModules()) {
+			for (IRFunction func : module.getIRFunctions()) {
+				for (IRCodeBB bb : func.getIRCodeBBs()) {
+					for (IRInsn inst : bb.getIRInsns()) {
+						if (inst instanceof IRLoadArrayInsn) {
+							IRLoadArrayInsn i = (IRLoadArrayInsn) inst;
+							SourceLocation srcLoc = i.getSourceLocation();
+							String srcLocStr = srcLoc.getStartLine() + " " + srcLoc.getStartColumn();
+							Vertex indexV = i.getIndex().loc();
+							Vertex baseV = i.getBase().loc();
+							for (Edge e : g.getCompleted()) {
+								Vertex v = e.getSource();
+								Vertex u = e.getTarget();
+								if (v == indexV && u.isNull()) {
+									System.out.println("NI " + srcLocStr + " -> "
+										+ u.outputFormString());	
+								}
+								if (v == baseV && u.isNull()) {
+									System.out.println("NA " + srcLocStr + " -> "
+										+ u.outputFormString());	
+								}
+							}
+						}
+
+						if (inst instanceof IRStoreArrayInsn) {
+							IRStoreArrayInsn i = (IRStoreArrayInsn) inst;
+							SourceLocation srcLoc = i.getSourceLocation();
+							String srcLocStr = srcLoc.getStartLine() + " " + srcLoc.getStartColumn();
+							Vertex baseV = i.getBase().loc();
+							Vertex indexV = i.getIndex().loc();
+							for (Edge e : g.getCompleted()) {
+								Vertex v = e.getSource();
+								Vertex u = e.getTarget();
+								if (v == indexV && u.isNull()) {
+									System.out.println("NI " + srcLocStr + " -> "
+										+ u.outputFormString());	
+								}
+								if (v == baseV && u.isNull()) {
+									System.out.println("NA " + srcLocStr + " -> "
+										+ u.outputFormString());	
+								}
+							}
+						}
+
+						if (inst instanceof IRLoadInsn) {
+							IRLoadInsn i = (IRLoadInsn) inst;
+							SourceLocation srcLoc = i.getSourceLocation();
+							String srcLocStr = srcLoc.getStartLine() + " " + srcLoc.getStartColumn();
+							Vertex baseV = i.getBase().loc();
+							for (Edge e : g.getCompleted()) {
+								Vertex v = e.getSource();
+								Vertex u = e.getTarget();
+								if (v == baseV && u.isNull()) {
+									System.out.println("NO " + srcLocStr + " -> "
+										+ u.outputFormString());	
+								}
+							}
+
+							IRType type = (IRType) i.getBase().getIRVar().getIRTypeRef();
+
+							boolean oneFieldIsNonNull = false;
+							for (IRVar fieldVar : baseV.getFields()) { 
+								IRType t = (IRType) fieldVar.getIRTypeRef();
+								if (t.isNonNull()) {
+									oneFieldIsNonNull = true;
+									break;
+								}
+							}
+
+							if (oneFieldIsNonNull) {
+								for (IRVar fieldVar : baseV.getFields()) {
+									System.out.println(fieldVar.getIRName());
+									SourceLocation fieldSrcLoc = fieldVar.getSourceLocation();
+									String fieldStr = fieldSrcLoc.toString();
+
+									HashSet<Vertex> vertices1 = pointsToSearch(g.getCompleted(), baseV);
+
+									for (Vertex v : vertices1) {
+										System.out.println("N " + srcLocStr + " -> "
+											+ v.outputFormString());
+									}
+
+									for (Edge e : g.getCompleted()) {
+										Vertex v = e.getSource();
+										Vertex u = e.getTarget();
+										if (e instanceof PointsToEdge && v.getReference() == baseV) {
+											System.out.println("N " + srcLocStr + " -> "
+												+ u.outputFormString());	
+										}
+
+									}
+								}
+							}
+						}
+
+						if (inst instanceof IRStoreInsn) {
+							IRStoreInsn i = (IRStoreInsn) inst;
+							Vertex baseV = i.getBase().loc();
+							IRType type = (IRType) baseV.getTypeRef();
+							if (type.getIRTypeCon() instanceof IRClass) {
+								IRClass classTy = (IRClass) type.getIRTypeCon();
+								for (IRVar var : classTy.getIRVars()) {
+									SourceLocation srcLoc = var.getSourceLocation();
+									String srcLocStr = srcLoc.getStartLine() + " " + srcLoc.getStartColumn();
+									IRType varTy = (IRType) var.getIRTypeRef();
+									if (varTy.isNonNull()) {
+										Vertex paramV = var.loc();
+										for (Edge e : g.getCompleted()) {
+											Vertex v = e.getSource();
+											Vertex u = e.getTarget();
+											if (e instanceof PointsToEdge && v.getReference() != null
+												&& v.getReference().getTypeRef() == baseV.getTypeRef()) {
+												System.out.println("N " + srcLocStr + " -> "
+													+ u.outputFormString());	
+											}
+										}
+										break;
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	public HashSet<Vertex> IRProgram.pointsToSearch(HashSet<Edge> edges, Vertex base) {
+		HashSet<Vertex> vertices = new HashSet<>();
+		for (Edge e : edges) {
+			Vertex v = e.getSource();
+			Vertex u = e.getTarget();
+
+			if (e instanceof PointsToEdge && v == base
+				&& u.getIsConstant()) {
+					vertices.add(u);
+				}
+
+			if (e instanceof PointsToEdge && v == base
+				&& sameClass((IRType) u.getTypeRef(), (IRType) base.getTypeRef())) {
+					vertices.addAll(pointsToSearch(edges, u));
+			}
+		}
+		return vertices;
+	}
+
+	public boolean IRProgram.sameClass(IRType a, IRType b) {
+		IRTypeCon aTypeCon = a.getIRTypeCon();
+		IRTypeCon bTypeCon = b.getIRTypeCon();
+		if (aTypeCon instanceof IRClass && bTypeCon instanceof IRClass) {
+			IRClass aClass = (IRClass) aTypeCon;
+			IRClass bClass = (IRClass) bTypeCon;
+			if (aClass.getIRVars().getNumChild() == bClass.getIRVars().getNumChild()) {
+				int i = 0;
+				for (IRVar aVar : aClass.getIRVars()) {
+					IRVar bVar = bClass.getIRVar(i);
+
+					IRType aType = (IRType) aVar.getIRTypeRef();
+					IRType bType = (IRType) bVar.getIRTypeRef();
+
+					if (aType != bType) {
+						return false;
+					}
+
+					i++;
+				}
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public boolean IRProgram.sameClass2(IRType a, IRClass bClass) {
+		IRTypeCon aTypeCon = a.getIRTypeCon();
+		if (aTypeCon instanceof IRClass) {
+			IRClass aClass = (IRClass) aTypeCon;
+			if (aClass.getIRVars().getNumChild() == bClass.getIRVars().getNumChild()) {
+				int i = 0;
+				for (IRVar aVar : aClass.getIRVars()) {
+					IRVar bVar = bClass.getIRVar(i);
+
+					IRType aType = (IRType) aVar.getIRTypeRef();
+					IRType bType = (IRType) bVar.getIRTypeRef();
+
+					if (aType != bType) {
+						return false;
+					}
+
+					i++;
+				}
+				return true;
+			}
+		}
+		return false;
+	}
+	
+
+    syn ArrayList<IRVar> IRInsn.getVars() {
+        return new ArrayList<>();
+    }
+
+    eq IRNewInsn.getVars() {
+        ArrayList<IRVar> vars = new ArrayList<>();
+        vars.add(getDst().getIRVar());
+        return vars;
+    }
+
+    eq IRCopyInsn.getVars() {
+        ArrayList<IRVar> vars = new ArrayList<>();
+        vars.add(getDst().getIRVar());
+        vars.add(getSrc().getIRVar());
+        return vars;
+    }
+
+    eq IRLoadInsn.getVars() {
+        ArrayList<IRVar> vars = new ArrayList<>();
+        vars.add(getDst().getIRVar());
+        vars.add(getBase().getIRVar());
+        return vars;
+    }
+
+    eq IRStoreInsn.getVars() {
+        ArrayList<IRVar> vars = new ArrayList<>();
+        vars.add(getSrc().getIRVar());
+        vars.add(getBase().getIRVar());
+        return vars;
+    }
+
+    eq IRCallInsn.getVars() {
+        ArrayList<IRVar> vars = new ArrayList<>();
+        vars.add(getDst().getIRVar());
+        for (IRVarRef arg : getArgs()) {
+            vars.add(arg.getIRVar());
+        }
+        return vars;
+    }
+
+    syn ArrayList<IRVar> IRCodeExit.getVars() {
+        return new ArrayList<>();
+    }
+
+    eq IRReturn.getVars() {
+        ArrayList<IRVar> vars = new ArrayList<>();
+        vars.add(getIRVarRef().getIRVar());
+        return vars;
+    }
+
+}
+
+
+// Debugging stuff
+aspect NonNullPointerAnalysisDebugging {
+
+}

@@ -1,0 +1,8 @@
+type T(x : string, y : int);
+
+fun main() = {
+  var b : T := new T("", null);
+  var c : nonnull T := b;
+
+  b := null;
+}

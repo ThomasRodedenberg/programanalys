@@ -1,0 +1,15 @@
+type Pair(fst : nonnull int, snd : int);
+
+fun null_producer(n : int) = {
+    if (n == 0) {
+       return null;
+    }
+    return n;
+}
+
+fun main(n : int) : nonnull int = {
+    var p : Pair := new Pair(0, 1);
+    p.snd := null;
+    p.fst := null_producer(n);
+    return p.fst;
+}
